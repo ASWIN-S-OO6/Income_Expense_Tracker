@@ -1,0 +1,6 @@
+- Initial release of Income Expense Tracker
+- Profile management for individual users and company accounts
+- Add, edit, and delete income and expense entries
+- Monthly books for organized financial tracking
+- Local data storage and offline support
+- Import and export data

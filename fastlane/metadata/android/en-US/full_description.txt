@@ -1,0 +1,12 @@
+Income Expense Tracker is an open-source application designed to help users manage monthly income and expenses efficiently.
+
+Features:
+- Separate profiles for individual users and company accounts
+- Separate monthly books for organized financial tracking
+- Add, edit, and delete income and expense entries
+- View monthly summaries and financial records
+- Data stored locally on the device (offline support)
+- Import and export functionality for backup and data transfer
+
+Privacy:
+This app stores all data locally on the device, does not use analytics or tracking services, does not include advertisements, and works completely offline.
