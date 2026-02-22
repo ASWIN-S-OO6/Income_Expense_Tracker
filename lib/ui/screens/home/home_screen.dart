@@ -103,7 +103,7 @@ class HomeScreen extends ConsumerWidget {
       final String csvData = const ListToCsvConverter().convert(rows);
 
       final directory = await getTemporaryDirectory();
-      final String filePath = '${directory.path}/Wealthify_${activeBook.name.replaceAll(' ', '_')}_Export.csv';
+      final String filePath = '${directory.path}/expense&income_${activeBook.name.replaceAll(' ', '_')}_Export.csv';
       final File file = File(filePath);
       await file.writeAsString(csvData);
 
