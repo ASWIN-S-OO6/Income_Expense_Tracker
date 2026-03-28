@@ -28,4 +28,5 @@ class LocalStorageService {
   Box<Profile> get profilesBox => Hive.box<Profile>(profilesBoxName);
   Box<Book> get booksBox => Hive.box<Book>(booksBoxName);
   Box<Entry> get entriesBox => Hive.box<Entry>(entriesBoxName);
+  Box get settingsBox => Hive.box('settings');
 }
