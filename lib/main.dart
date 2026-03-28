@@ -5,6 +5,7 @@ import 'package:home_widget/home_widget.dart';
 import 'core/theme/app_theme.dart';
 import 'data/services/local_storage.dart';
 import 'providers/profile_provider.dart';
+import 'providers/book_provider.dart';
 import 'ui/screens/home/home_screen.dart';
 import 'ui/screens/entry/add_entry_screen.dart';
 import 'providers/theme_provider.dart';
@@ -60,8 +61,20 @@ class _ExpenseTrackerAppState extends ConsumerState<ExpenseTrackerApp> {
   void _handleWidgetRoute(Uri? uri) {
     if (uri != null && uri.host == 'add') {
       final typeStr = uri.queryParameters['type'];
-      final type = typeStr == 'income' ? EntryType.income : EntryType.expense;
-      
+      final bookId  = uri.queryParameters['bookId'];
+      final type    = typeStr == 'income' ? EntryType.income : EntryType.expense;
+
+      // If a bookId was passed, switch to that book first
+      if (bookId != null) {
+        final container = ProviderScope.containerOf(
+            navigatorKey.currentContext!, listen: false);
+        final storage = container.read(localStorageProvider);
+        final book    = storage.booksBox.get(bookId);
+        if (book != null) {
+          container.read(bookProvider.notifier).setActiveBook(book);
+        }
+      }
+
       navigatorKey.currentState?.push(
         MaterialPageRoute(
           builder: (context) => AddEntryScreen(initialType: type),

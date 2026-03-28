@@ -6,7 +6,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
-import 'package:excel/excel.dart';
+import 'package:excel/excel.dart' hide Border;
 import 'package:uuid/uuid.dart';
 import '../../../providers/book_provider.dart';
 import '../../../providers/entry_provider.dart';
@@ -345,58 +345,95 @@ class _DashboardOverview extends ConsumerStatefulWidget {
 class _DashboardOverviewState extends ConsumerState<_DashboardOverview> {
   String _searchQuery = '';
   bool _showSearch = false;
+  bool _showFilters = false;
   bool _groupByMonth = false;
+  double? _minAmount;
+  double? _maxAmount;
+  DateTimeRange? _dateRange;
+  String? _categoryFilter; // set when user taps a top-spending row
   final _searchController = TextEditingController();
+  final _minAmountCtrl = TextEditingController();
+  final _maxAmountCtrl = TextEditingController();
+
+  void _resetFilters() {
+    setState(() {
+      _searchQuery = '';
+      _minAmount = null;
+      _maxAmount = null;
+      _dateRange = null;
+      _categoryFilter = null;
+      _searchController.clear();
+      _minAmountCtrl.clear();
+      _maxAmountCtrl.clear();
+    });
+  }
+
+  bool get _hasActiveFilter =>
+      _searchQuery.isNotEmpty ||
+      _minAmount != null ||
+      _maxAmount != null ||
+      _dateRange != null ||
+      _categoryFilter != null;
 
   @override
   void dispose() {
     _searchController.dispose();
+    _minAmountCtrl.dispose();
+    _maxAmountCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final entries = ref.watch(entryProvider);
+    final entries    = ref.watch(entryProvider);
     final activeBook = ref.watch(bookProvider);
-    final profile = ref.watch(profileProvider);
-    final symbol = profile?.currencySymbol ?? '\$';
+    final profile    = ref.watch(profileProvider);
+    final symbol     = profile?.currencySymbol ?? '\$';
 
-    double totalIncome = 0;
-    double totalExpense = 0;
+    double totalIncome = 0, totalExpense = 0;
     for (var e in entries) {
-      if (e.type == EntryType.income) {
-        totalIncome += e.amount;
-      } else {
-        totalExpense += e.amount;
-      }
+      if (e.type == EntryType.income) totalIncome += e.amount;
+      else totalExpense += e.amount;
     }
     final initialAmount = activeBook?.initialAmount ?? 0.0;
-    final remaining = initialAmount + totalIncome - totalExpense;
+    final remaining     = initialAmount + totalIncome - totalExpense;
 
-    // Apply search filter
-    final filteredEntries = _searchQuery.isEmpty
-        ? entries
-        : entries
-            .where((e) =>
-                e.payeeOrPayer
-                    .toLowerCase()
-                    .contains(_searchQuery.toLowerCase()) ||
-                e.category
-                    .toLowerCase()
-                    .contains(_searchQuery.toLowerCase()) ||
-                (e.notes)
-                    .toLowerCase()
-                    .contains(_searchQuery.toLowerCase()))
-            .toList();
+    // ── Apply all filters ──
+    final filteredEntries = entries.where((e) {
+      // Text search: payee, category, notes, AND amount (toString match)
+      if (_searchQuery.isNotEmpty) {
+        final q = _searchQuery.toLowerCase();
+        final matchText = e.payeeOrPayer.toLowerCase().contains(q) ||
+            e.category.toLowerCase().contains(q) ||
+            e.notes.toLowerCase().contains(q) ||
+            e.amount.toString().contains(q);
+        if (!matchText) return false;
+      }
+      // Category filter from insights tap
+      if (_categoryFilter != null && e.category != _categoryFilter) return false;
+      // Amount range
+      if (_minAmount != null && e.amount < _minAmount!) return false;
+      if (_maxAmount != null && e.amount > _maxAmount!) return false;
+      // Date range
+      if (_dateRange != null) {
+        final d = e.timestamp;
+        if (d.isBefore(_dateRange!.start) ||
+            d.isAfter(_dateRange!.end.add(const Duration(days: 1)))) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
 
     // Build spending insights (top 3 expense categories)
     final Map<String, double> catSpend = {};
     for (var e in entries.where((e) => e.type == EntryType.expense)) {
       catSpend[e.category] = (catSpend[e.category] ?? 0) + e.amount;
     }
-    final topCategories = catSpend.entries.toList()
-      ..sort((a, b) => b.value.compareTo(a.value));
-    final top3 = topCategories.take(3).toList();
+    final top3 = (catSpend.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value)))
+        .take(3)
+        .toList();
 
     return Column(
       children: [
@@ -411,7 +448,7 @@ class _DashboardOverviewState extends ConsumerState<_DashboardOverview> {
                   autofocus: true,
                   onChanged: (v) => setState(() => _searchQuery = v),
                   decoration: InputDecoration(
-                    hintText: 'Search payee, category, notes…',
+                    hintText: 'Search payee, category, amount, notes…',
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: IconButton(
                       icon: const Icon(Icons.close),
@@ -424,19 +461,117 @@ class _DashboardOverviewState extends ConsumerState<_DashboardOverview> {
                     isDense: true,
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    border:
-                        OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24)),
                   ),
                 )
               : const SizedBox.shrink(),
         ),
 
-        // ── Filter bar ──
+        // ── Advanced filter panel ──
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          height: _showFilters ? 110 : 0,
+          clipBehavior: Clip.hardEdge,
+          decoration: const BoxDecoration(),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Column(
+              children: [
+                Row(children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _minAmountCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (v) =>
+                          setState(() => _minAmount = double.tryParse(v)),
+                      decoration: InputDecoration(
+                        hintText: 'Min amount',
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _maxAmountCtrl,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (v) =>
+                          setState(() => _maxAmount = double.tryParse(v)),
+                      decoration: InputDecoration(
+                        hintText: 'Max amount',
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final picked = await showDateRangePicker(
+                        context: context,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(2100),
+                        initialDateRange: _dateRange,
+                        builder: (ctx, child) => Theme(
+                          data: Theme.of(ctx),
+                          child: child!,
+                        ),
+                      );
+                      if (picked != null) {
+                        setState(() => _dateRange = picked);
+                      }
+                    },
+                    style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 10)),
+                    icon: const Icon(Icons.date_range, size: 18),
+                    label: Text(
+                      _dateRange == null
+                          ? 'Dates'
+                          : '${DateFormat('d MMM').format(_dateRange!.start)}–${DateFormat('d MMM').format(_dateRange!.end)}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ]),
+                if (_categoryFilter != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Chip(
+                      label: Text('Category: $_categoryFilter'),
+                      deleteIcon: const Icon(Icons.close, size: 16),
+                      onDeleted: () =>
+                          setState(() => _categoryFilter = null),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+
+        // ── Filter toolbar ──
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.end,
             children: [
+              if (_hasActiveFilter)
+                TextButton.icon(
+                  onPressed: _resetFilters,
+                  icon: const Icon(Icons.filter_alt_off, size: 16),
+                  label: const Text('Clear', style: TextStyle(fontSize: 12)),
+                  style: TextButton.styleFrom(
+                      foregroundColor: Colors.orange.shade700),
+                ),
+              const Spacer(),
               IconButton(
                 icon: Icon(Icons.search,
                     color: _showSearch
@@ -444,7 +579,16 @@ class _DashboardOverviewState extends ConsumerState<_DashboardOverview> {
                         : Colors.grey.shade500),
                 onPressed: () =>
                     setState(() => _showSearch = !_showSearch),
-                tooltip: 'Search',
+                tooltip: 'Text search',
+              ),
+              IconButton(
+                icon: Icon(Icons.tune,
+                    color: _showFilters
+                        ? AppColors.primaryLight
+                        : Colors.grey.shade500),
+                onPressed: () =>
+                    setState(() => _showFilters = !_showFilters),
+                tooltip: 'Amount & date filters',
               ),
               IconButton(
                 icon: Icon(
@@ -568,7 +712,16 @@ class _DashboardOverviewState extends ConsumerState<_DashboardOverview> {
                     child: _SpendingInsightsCard(
                         top3: top3,
                         totalExpense: totalExpense,
-                        symbol: symbol),
+                        symbol: symbol,
+                        selectedCategory: _categoryFilter,
+                        onCategoryTap: (cat) {
+                          setState(() {
+                            // Toggle: tap same category again to clear filter
+                            _categoryFilter =
+                                _categoryFilter == cat ? null : cat;
+                            _showFilters = _categoryFilter != null;
+                          });
+                        }),
                   ),
                 ),
 
@@ -580,9 +733,11 @@ class _DashboardOverviewState extends ConsumerState<_DashboardOverview> {
                     children: [
                       Expanded(
                         child: Text(
-                          _searchQuery.isNotEmpty
-                              ? 'Search Results (${filteredEntries.length})'
-                              : 'Recent Activity',
+                          _categoryFilter != null
+                              ? 'Filtered: $_categoryFilter (${filteredEntries.length})'
+                              : _hasActiveFilter
+                                  ? 'Filtered Results (${filteredEntries.length})'
+                                  : 'Recent Activity',
                           style: Theme.of(context)
                               .textTheme
                               .titleLarge
@@ -691,11 +846,16 @@ class _SpendingInsightsCard extends StatelessWidget {
   final List<MapEntry<String, double>> top3;
   final double totalExpense;
   final String symbol;
+  final String? selectedCategory;
+  final void Function(String category) onCategoryTap;
 
-  const _SpendingInsightsCard(
-      {required this.top3,
-      required this.totalExpense,
-      required this.symbol});
+  const _SpendingInsightsCard({
+    required this.top3,
+    required this.totalExpense,
+    required this.symbol,
+    required this.onCategoryTap,
+    this.selectedCategory,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -719,52 +879,85 @@ class _SpendingInsightsCard extends StatelessWidget {
               const Icon(Icons.insights_rounded,
                   color: AppColors.primaryLight, size: 20),
               const SizedBox(width: 8),
-              Text('Top Spending',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w800)),
+              Expanded(
+                child: Text('Top Spending',
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w800)),
+              ),
+              Text('Tap to filter',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Colors.grey.shade400,
+                      fontStyle: FontStyle.italic)),
             ],
           ),
           const SizedBox(height: 16),
           for (final entry in top3) ...[
-            Row(
-              children: [
-                SizedBox(
-                  width: 100,
-                  child: Text(
-                    entry.key,
-                    style: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w600),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+            InkWell(
+              onTap: () => onCategoryTap(entry.key),
+              borderRadius: BorderRadius.circular(10),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                decoration: BoxDecoration(
+                  color: selectedCategory == entry.key
+                      ? AppColors.expenseColor.withValues(alpha: 0.10)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value:
-                          totalExpense > 0 ? entry.value / totalExpense : 0,
-                      minHeight: 8,
-                      backgroundColor:
-                          AppColors.expenseColor.withValues(alpha: 0.1),
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                          AppColors.expenseColor),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 100,
+                      child: Text(
+                        entry.key,
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: selectedCategory == entry.key
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                            color: selectedCategory == entry.key
+                                ? AppColors.expenseColor
+                                : null),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: totalExpense > 0
+                              ? entry.value / totalExpense
+                              : 0,
+                          minHeight: 8,
+                          backgroundColor:
+                              AppColors.expenseColor.withValues(alpha: 0.1),
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            selectedCategory == entry.key
+                                ? AppColors.expenseColor
+                                : AppColors.expenseColor.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      Formatters.formatCurrency(entry.value, symbol: symbol),
+                      style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: selectedCategory == entry.key
+                              ? AppColors.expenseColor
+                              : Colors.grey.shade600),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  Formatters.formatCurrency(entry.value, symbol: symbol),
-                  style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.expenseColor),
-                ),
-              ],
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 6),
           ],
         ],
       ),

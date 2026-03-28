@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:home_widget/home_widget.dart';
 import '../data/models/book.dart';
 import 'profile_provider.dart';
 
@@ -37,9 +38,17 @@ class BookNotifier extends Notifier<Book?> {
   Future<void> _persistLastBook(Book book) async {
     final currentProfile = ref.read(profileProvider);
     if (currentProfile == null) return;
-    await ref.read(localStorageProvider).settingsBox.put(
+    final storage = ref.read(localStorageProvider);
+    await storage.settingsBox.put(
       '$_lastBookKeyPrefix${currentProfile.id}',
       book.id,
+    );
+    // Push to Android widget so it shows the correct book name
+    await HomeWidget.saveWidgetData<String>('widget_book_id', book.id);
+    await HomeWidget.saveWidgetData<String>('widget_book_name', book.name);
+    await HomeWidget.updateWidget(
+      qualifiedAndroidName:
+          'com.nth.expense_tracker.QuickAddWidgetProvider',
     );
   }
 
